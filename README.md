@@ -1,5 +1,5 @@
 # 2DHeatTransfer
-2D Heat Transfer using OpenMP and some of Bentley’s rules for optimisatio
+2D Heat Transfer using OpenMP and some of Bentley’s rules for optimisation
 
 
 Introduction:
