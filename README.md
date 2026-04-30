@@ -204,3 +204,87 @@ The animation is created with FuncAnimation, updating both the pressure field an
 
 ![photo example](./photos_wave/example.png)
 
+
+## CUDA implementation
+
+As the final optimization step, I rewrote the main numerical kernels using raw CUDA.
+
+The goal was to move the most computationally expensive part of the simulation from the CPU to the GPU. Both the heat transfer and wave propagation simulations are based on stencil computations, where each grid cell is updated using values from its neighboring cells. This structure is naturally parallel, since each cell can be computed independently for a given time step.
+
+### Heat transfer CUDA kernel
+
+For the heat transfer simulation, the naive CUDA implementation achieved the best result:
+
+| Implementation | Runtime |
+|---|---:|
+| OpenMP CPU | 15.43 s |
+| PyTorch | 10.00 s |
+| Raw CUDA naive kernel | 1.40 s |
+| Raw CUDA tiled kernel | 2.00–2.20 s |
+
+The raw CUDA kernel significantly outperformed both the OpenMP CPU implementation and the PyTorch implementation. The main reason is that the CUDA version avoids Python-level loops and directly launches a compact GPU kernel for the grid update.
+
+The naive CUDA kernel was faster than the tiled version. This result may seem counterintuitive at first, because shared memory tiling is often used to reduce global memory accesses. However, in this specific stencil problem, the tiled implementation introduced additional overhead:
+
+- more boundary checks,
+- more conditional branches,
+- shared memory loading logic,
+- synchronization between threads,
+- halo-cell handling around each tile.
+
+For this heat transfer kernel, the arithmetic intensity is low, and each value is only reused a small number of times. Because of that, the extra complexity of manual shared memory tiling did not pay off. Modern GPUs also have efficient L1/L2 caching, so the naive global-memory version was already reasonably efficient.
+
+This makes the heat transfer kernel different from problems like matrix multiplication, where shared memory tiling is much more effective because each loaded value is reused many times.
+
+### Wave propagation CUDA kernel
+
+For the wave propagation simulation, the raw CUDA implementation achieved:
+
+| Implementation | Runtime |
+|---|---:|
+| OpenMP CPU | 4.54 s |
+| PyTorch | 0.194 s |
+| Raw CUDA kernel | 0.400 s |
+
+The CUDA implementation was much faster than the OpenMP CPU version, reducing runtime from 4.54 seconds to approximately 0.400 seconds.
+
+However, it did not outperform PyTorch, which reached approximately 0.194 seconds. This is probably because the wave propagation update is a very regular stencil operation, and PyTorch can execute such tensor operations using highly optimized backend kernels. In this case, PyTorch likely benefits from very efficient GPU memory access patterns and optimized internal kernel implementations.
+
+The raw CUDA version is still valuable because it gives direct control over:
+
+- thread/block configuration,
+- memory access patterns,
+- kernel structure,
+- synchronization,
+- possible future optimizations.
+
+This makes it more useful for learning low-level GPU programming and for extending the simulation beyond simple tensor operations.
+
+### Summary
+
+The CUDA implementation showed that raw GPU kernels can provide a major speedup over CPU-based OpenMP code for grid-based physical simulations. For heat transfer, the naive CUDA kernel achieved the best result. For wave propagation, PyTorch remained faster, but the raw CUDA version still provided a strong speedup over the CPU implementation and gave much more control over the computation.
+
+
+
+## Performance comparison
+
+The following table compares the execution time of different implementations on the same machine.
+
+**Hardware:**
+- CPU: AMD Ryzen 9 AI HX 370
+- GPU: NVIDIA GeForce RTX 5060 Laptop GPU
+
+| Simulation | Implementation | Runtime |
+|---|---:|---:|
+| 2D Heat Transfer | OpenMP CPU | 15.43 s |
+| 2D Heat Transfer | PyTorch | 10.00 s |
+| 2D Heat Transfer | Raw CUDA naive kernel | 1.40 s |
+| 2D Heat Transfer | Raw CUDA tiled kernel | 2.00–2.20 s |
+| 2D Wave Propagation | OpenMP CPU | 4.54 s |
+| 2D Wave Propagation | PyTorch | 0.194 s |
+| 2D Wave Propagation | Raw CUDA kernel | 0.400 s |
+
+The CUDA implementation gives the best result for the heat transfer simulation, reducing runtime from 15.43 seconds with OpenMP to approximately 1.40 seconds with a naive CUDA kernel.
+
+For the wave propagation simulation, the raw CUDA implementation reaches 0.400 seconds, which is significantly faster than the OpenMP version. However, PyTorch performs even better in this case, reaching approximately 0.194 seconds. This is likely because the wave update is a simple stencil operation that maps very efficiently to highly optimized PyTorch GPU kernels.
+
